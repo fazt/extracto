@@ -26,9 +26,19 @@ function peticion(id: unknown = ID) {
 const fetchMock = vi.fn();
 const vector = () => Array.from({ length: DIMENSIONES }, () => 0.01);
 
-/** Devuelve tantos embeddings como fragmentos pida la ruta. */
-function embeddingsSegunPeticion() {
-  fetchMock.mockImplementation(async (_url: string, init: { body: string }) => {
+/**
+ * Embeddings para lo que pida la ruta y, cuando toque, una transcripción:
+ * al archivar sin texto guardado, la ruta pide primero la transcripción.
+ */
+function embeddingsSegunPeticion(transcripcion: string | null = "TEXTO TRANSCRITO DEL DOCUMENTO") {
+  fetchMock.mockImplementation(async (url: string, init: { body: string }) => {
+    if (url.includes("/chat/completions")) {
+      if (transcripcion === null) return new Response("boom", { status: 500 });
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: transcripcion } }] }),
+        { status: 200 },
+      );
+    }
     const { input } = JSON.parse(init.body);
     return new Response(
       JSON.stringify({
@@ -39,13 +49,28 @@ function embeddingsSegunPeticion() {
   });
 }
 
+/** Cuerpo de la llamada de transcripción, si la hubo. */
+function peticionDeTranscripcion() {
+  const llamada = fetchMock.mock.calls.find(([url]) => url.includes("/chat/completions"));
+  return llamada ? JSON.parse(llamada[1].body) : null;
+}
+
 /** Filtra las llamadas hechas dentro de la transacción por tabla. */
 function inserts(tabla: string) {
   return clienteQuery.mock.calls.filter(([sql]) => sql.includes(`INSERT INTO ${tabla}`));
 }
 
 function conExtraccion(datos: Extraccion) {
-  query.mockResolvedValue({ rows: [{ extraction: datos }] });
+  query.mockResolvedValue({
+    rows: [
+      {
+        extraction: datos,
+        filename: "factura.png",
+        mime_type: "image/png",
+        data: Buffer.from("imagen"),
+      },
+    ],
+  });
 }
 
 beforeEach(() => {
@@ -163,13 +188,42 @@ describe("POST /api/confirm", () => {
     expect(input[0]).toContain("TOSTADORES DEL SUR");
   });
 
-  it("cae al texto derivado de los datos si no hay transcripción", async () => {
+  it("transcribe el documento al archivar cuando el borrador no trae texto", async () => {
     conExtraccion({ ...facturaValida(), texto: null });
+
+    const res = await POST(peticion());
+
+    expect(res.status).toBe(200);
+    expect(peticionDeTranscripcion()).not.toBeNull();
+
+    const embeddings = fetchMock.mock.calls.find(([url]) => url.includes("/embeddings"));
+    const { input } = JSON.parse(embeddings![1].body);
+    expect(input[0]).toContain("TEXTO TRANSCRITO");
+
+    // El texto conseguido se guarda: reconfirmar no vuelve a transcribir.
+    const guardado = clienteQuery.mock.calls.find(([sql]) => sql.includes("jsonb_set"));
+    expect(guardado).toBeDefined();
+  });
+
+  it("no vuelve a transcribir si el borrador ya trae texto", async () => {
+    conExtraccion({ ...facturaValida(), texto: "YA TRANSCRITO ANTES" });
 
     await POST(peticion());
 
-    const { input } = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(input[0]).toContain("Tostadores del Sur S.L.");
+    expect(peticionDeTranscripcion()).toBeNull();
+    const embeddings = fetchMock.mock.calls.find(([url]) => url.includes("/embeddings"));
+    expect(JSON.parse(embeddings![1].body).input[0]).toContain("YA TRANSCRITO ANTES");
+  });
+
+  it("archiva igual si la transcripción falla, con el texto derivado de los datos", async () => {
+    embeddingsSegunPeticion(null);
+    conExtraccion({ ...facturaValida(), texto: null });
+
+    const res = await POST(peticion());
+
+    expect(res.status).toBe(200);
+    const embeddings = fetchMock.mock.calls.find(([url]) => url.includes("/embeddings"));
+    expect(JSON.parse(embeddings![1].body).input[0]).toContain("Tostadores del Sur S.L.");
   });
 
   it("rechaza confirmar un documento con campos inválidos", async () => {

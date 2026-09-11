@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { pool } from "@/lib/db";
 import { ExtraccionBrutaSchema, validarExtraccion } from "@/lib/schemas";
-import { CHAT_URL, MODELO, cabeceras, claveOpenRouter } from "@/lib/openrouter";
+import { CHAT_URL, MODELO, PROVEEDORES, cabeceras, claveOpenRouter } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -19,11 +19,9 @@ documento y devuelves únicamente sus datos estructurados en JSON.
 - Usa null en cualquier campo que el documento no contenga o que no puedas leer con certeza.
 - Los importes van como números, sin símbolo de moneda ni separadores de miles.
 - El campo "contrato" sólo se rellena cuando tipo_documento es "contrato"; si no, va null.
-- Anota en "notas" cualquier campo ilegible o ambiguo.
-- En "texto" transcribe literalmente todo el texto visible del documento, en orden de
-  lectura, sin resumirlo ni reordenarlo.`;
+- Anota en "notas" cualquier campo ilegible o ambiguo.`;
 
-const jsonSchema = z.toJSONSchema(ExtraccionBrutaSchema);
+const jsonSchema = z.toJSONSchema(ExtraccionBrutaSchema.omit({ texto: true }));
 
 type ContentPart =
   | { type: "text"; text: string }
@@ -76,17 +74,18 @@ export async function POST(request: Request) {
       { role: "system", content: SYSTEM },
       { role: "user", content: parts },
     ],
-    // La transcripción del documento hace la respuesta larga: sin margen de
-    // tokens el JSON se corta a medias.
     max_tokens: 8000,
+    // Clasificar y copiar campos no requiere razonar; los tokens de razonamiento
+    // sólo alargaban la espera.
+    reasoning: { enabled: false },
     // Structured outputs: el proveedor obliga al modelo a respetar el esquema.
     response_format: {
       type: "json_schema",
       json_schema: { name: "extraccion", strict: true, schema: jsonSchema },
     },
-    // Sin esto OpenRouter puede enrutar a un proveedor que ignore
-    // response_format y devuelva una respuesta vacía.
-    provider: { require_parameters: true },
+    // Sin esto OpenRouter puede enrutar a un proveedor que ignore response_format
+    // y devuelva una respuesta vacía, o a uno que tarde veinte segundos de más.
+    provider: PROVEEDORES,
     ...(isPdf ? { plugins: [{ id: "file-parser", pdf: { engine: PDF_ENGINE } }] } : {}),
   };
 
@@ -145,7 +144,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const validado = ExtraccionBrutaSchema.safeParse(parsed);
+  const validado = ExtraccionBrutaSchema.safeParse({
+    ...(parsed as object),
+    // La transcripción llega al archivar, no aquí.
+    texto: null,
+  });
   if (!validado.success) {
     return NextResponse.json(
       {

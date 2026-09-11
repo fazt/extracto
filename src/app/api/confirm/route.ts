@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { ExtraccionBrutaSchema, validarExtraccion } from "@/lib/schemas";
 import { aVector, embeber, textoDeRespaldo, trocear } from "@/lib/embeddings";
+import { transcribir } from "@/lib/transcripcion";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
   }
 
   const { rows } = await pool.query(
-    `SELECT extraction FROM documents WHERE id = $1`,
+    `SELECT extraction, filename, mime_type, data FROM documents WHERE id = $1`,
     [id],
   );
   if (rows.length === 0) {
@@ -42,9 +43,14 @@ export async function POST(request: Request) {
     );
   }
 
+  // El texto para indexar se consigue aquí, no en el análisis: transcribir son
+  // entre mil y dos mil tokens de salida y duplicaba la espera de la revisión.
+  const doc = rows[0] as { filename: string; mime_type: string; data: Buffer };
+  const transcrito = datos.texto?.trim() ? datos.texto : await transcribir(doc);
+  const texto = transcrito?.trim() ? transcrito : textoDeRespaldo(datos);
+
   // Los embeddings se piden antes de abrir la transacción: si el proveedor
   // falla, no dejamos una transacción abierta esperando por la red.
-  const texto = datos.texto?.trim() ? datos.texto : textoDeRespaldo(datos);
   const trozos = trocear(texto);
 
   let vectores: number[][];
@@ -128,6 +134,14 @@ export async function POST(request: Request) {
         `INSERT INTO documento_chunks (document_id, orden, texto, embedding)
          VALUES ($1,$2,$3,$4)`,
         [id, orden, trozo, aVector(vectores[orden])],
+      );
+    }
+
+    // El texto queda guardado en el borrador: reconfirmar no vuelve a transcribir.
+    if (transcrito && !datos.texto) {
+      await cliente.query(
+        `UPDATE documents SET extraction = jsonb_set(extraction, '{texto}', to_jsonb($2::text)) WHERE id = $1`,
+        [id, transcrito],
       );
     }
 

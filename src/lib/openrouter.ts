@@ -9,6 +9,17 @@ export function claveOpenRouter(): string | null {
   return process.env.OPENROUTER_API_KEY || null;
 }
 
+/**
+ * Enrutado de proveedor. `require_parameters` deja fuera a quien ignoraría el
+ * esquema y devolvería una respuesta vacía; el `order` antepone a los que, medidos
+ * sobre el mismo documento, responden en segundos y no en decenas de segundos:
+ * sin él la misma petición oscilaba entre 1,5 s y 24 s según a quién tocara.
+ */
+export const PROVEEDORES = {
+  order: ["venice", "fireworks", "deepinfra"],
+  require_parameters: true,
+} as const;
+
 export function cabeceras(apiKey: string): Record<string, string> {
   return {
     Authorization: `Bearer ${apiKey}`,

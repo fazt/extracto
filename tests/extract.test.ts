@@ -70,6 +70,19 @@ describe("POST /api/extract", () => {
     expect(JSON.parse(update[1][2]).numero_documento).toBe("F-2026/0418");
   });
 
+  it("no pide la transcripción: el texto llega al archivar", async () => {
+    fetchMock.mockResolvedValue(respuestaModelo(JSON.stringify(facturaValida())));
+
+    const res = await POST(peticion());
+    const body = await res.json();
+
+    const enviado = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const esquema = enviado.response_format.json_schema.schema;
+    expect(Object.keys(esquema.properties)).not.toContain("texto");
+    expect(enviado.messages[0].content).not.toMatch(/transcribe/i);
+    expect(body.extraction.texto).toBeNull();
+  });
+
   it("manda el PDF como parte file con el plugin de OCR", async () => {
     fetchMock.mockResolvedValue(respuestaModelo(JSON.stringify(facturaValida())));
 
@@ -186,7 +199,9 @@ describe("robustez frente al proveedor", () => {
     await POST(peticion());
 
     const enviado = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(enviado.provider).toEqual({ require_parameters: true });
+    expect(enviado.provider.require_parameters).toBe(true);
+    // El orden antepone a los proveedores rápidos medidos sobre el mismo documento.
+    expect(enviado.provider.order[0]).toBe("venice");
     expect(enviado.max_tokens).toBeGreaterThanOrEqual(8000);
   });
 
