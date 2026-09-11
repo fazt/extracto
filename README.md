@@ -12,6 +12,8 @@ búsqueda semántica cuando va del contenido.
 Los archivos y el JSON extraído se guardan en PostgreSQL con la extensión
 **pgvector**, lista para añadir embeddings más adelante.
 
+**En producción:** https://extracto.seenode.app
+
 ## Requisitos
 
 - Node.js 20+
@@ -104,6 +106,29 @@ problemas a la vez.
 
 Nada de esto bloquea el guardado: un documento con problemas se guarda igual, con
 los campos marcados en rojo, porque suelen ser correcciones en curso.
+
+## Despliegue
+
+Está desplegado en [Seenode](https://seenode.com) (Frankfurt) desde la rama `master`
+de este repositorio:
+
+| Recurso | Detalle |
+| --- | --- |
+| App web | Node 24, paquete Basic (0.25 CPU / 512 MB) |
+| Base de datos | PostgreSQL 16.14 gestionado, paquete Basic (1 GB), con pgvector 0.8.6 |
+
+- **Build:** `npm ci --include=dev && npm run build`. El `--include=dev` es
+  obligatorio: con `NODE_ENV=production`, `npm ci` se saltaría Tailwind y PostCSS,
+  que hacen falta para compilar.
+- **Arranque:** `node scripts/migrate.mjs && npx next start`. El script aplica
+  `db/init/*.sql` (todo idempotente) y deja escrito en el log qué versión de pgvector
+  encontró; en local ese trabajo lo hace el entrypoint de Docker.
+- **Variables:** `DATABASE_URL` la inyecta Seenode al enlazar la base;
+  `OPENROUTER_API_KEY` va como secreto; `DATABASE_SSL=on` fuerza TLS, porque el
+  Postgres gestionado rechaza las conexiones sin cifrar.
+
+Para desplegar cambios: `git push` y lanzar un nuevo despliegue (la entrega continua
+está desactivada).
 
 ## Tests
 
