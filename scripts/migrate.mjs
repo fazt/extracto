@@ -25,7 +25,7 @@ if (!url) {
 const ssl =
   process.env.DATABASE_SSL === "off"
     ? false
-    : /sslmode=require|DATABASE_SSL=on/.test(`${url}${process.env.DATABASE_SSL ?? ""}`)
+    : /sslmode=require/.test(url) || process.env.DATABASE_SSL === "on"
       ? { rejectUnauthorized: false }
       : false;
 
