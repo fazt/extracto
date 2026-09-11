@@ -127,9 +127,13 @@ de este repositorio:
   `OPENROUTER_API_KEY` va como secreto; `DATABASE_SSL=on` fuerza TLS, porque el
   Postgres gestionado rechaza las conexiones sin cifrar.
 
-La entrega continua está activada: cada push a `master` dispara build y despliegue.
-Conviene que `npm test` y `npm run build` pasen antes de empujar, porque esa rama es
-la que sirve producción.
+La entrega continua (`autoDeploy`) está activada en la aplicación, pero sólo entra en
+funcionamiento cuando la GitHub App de Seenode está instalada sobre el repositorio:
+es ella quien crea el webhook de push. Sin esa instalación el flag no hace nada y hay
+que lanzar el despliegue a mano.
+
+Cuando esté activa, cada push a `master` dispara build y despliegue, así que conviene
+que `npm test` y `npm run build` pasen antes de empujar: esa rama sirve producción.
 
 ## Tests
 
