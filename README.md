@@ -127,8 +127,9 @@ de este repositorio:
   `OPENROUTER_API_KEY` va como secreto; `DATABASE_SSL=on` fuerza TLS, porque el
   Postgres gestionado rechaza las conexiones sin cifrar.
 
-Para desplegar cambios: `git push` y lanzar un nuevo despliegue (la entrega continua
-está desactivada).
+La entrega continua está activada: cada push a `master` dispara build y despliegue.
+Conviene que `npm test` y `npm run build` pasen antes de empujar, porque esa rama es
+la que sirve producción.
 
 ## Tests
 
