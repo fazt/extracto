@@ -1,0 +1,22 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: extracto-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: extracto
+      POSTGRES_PASSWORD: extracto
+      POSTGRES_DB: extracto
+    ports:
+      - "5435:5432"
+    volumes:
+      - extracto-pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U extracto -d extracto"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  extracto-pgdata:
