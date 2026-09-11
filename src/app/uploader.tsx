@@ -1,10 +1,21 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Chat from "./chat";
 import DatosForm from "./datos-form";
 import ListaRegistros from "./lista-registros";
-import { ETIQUETA_TIPO, type Extraccion } from "@/lib/schemas";
+import SelectorDocumento from "./selector-documento";
+import SubirModal from "./subir-modal";
+import ConmutadorTema from "./tema";
+import {
+  IconoArchivo,
+  IconoAviso,
+  IconoConforme,
+  IconoPregunta,
+  IconoRecargar,
+  IconoSubir,
+} from "./iconos";
+import type { Extraccion } from "@/lib/schemas";
 import type { Registro } from "@/lib/registros";
 
 export type Doc = {
@@ -17,11 +28,9 @@ export type Doc = {
   extraction: Extraccion | null;
 };
 
-const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,application/pdf";
-
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -37,6 +46,11 @@ export default function Uploader({
   const [docs, setDocs] = useState<Doc[]>(initialDocs);
   const [registros, setRegistros] = useState<Registro[]>(initialRegistros);
   const [selectedId, setSelectedId] = useState<string | null>(initialDocs[0]?.id ?? null);
+  const [vista, setVista] = useState<"revisar" | "archivo">("revisar");
+  // En móvil no caben documento e inspector a la vez: se conmuta entre ellos.
+  const [panelMovil, setPanelMovil] = useState<"documento" | "datos">("documento");
+  const [subirAbierto, setSubirAbierto] = useState(false);
+  const [chatAbierto, setChatAbierto] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -44,10 +58,10 @@ export default function Uploader({
   const [confirmando, setConfirmando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(dbError);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const selected = docs.find((d) => d.id === selectedId) ?? null;
-  const confirmado = registros.some((r) => r.document_id === selectedId);
+  const archivados = new Set(registros.map((r) => r.document_id));
+  const confirmado = selectedId !== null && archivados.has(selectedId);
 
   const actualizar = useCallback((id: string, cambios: Partial<Doc>) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...cambios } : d)));
@@ -62,17 +76,21 @@ export default function Uploader({
     setError(null);
     setAviso(null);
     setUploading(true);
+    setVista("revisar");
     try {
       const body = new FormData();
       body.append("file", file);
       const res = await fetch("/api/upload", { method: "POST", body });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Error al subir el archivo");
+      if (!res.ok) throw new Error(data.error ?? "No se pudo subir el archivo");
       const doc: Doc = { ...data, doc_type: null, extraction: null };
       setDocs((prev) => [doc, ...prev]);
       setSelectedId(doc.id);
+      setPanelMovil("documento");
+      setSubirAbierto(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error inesperado");
+      setSubirAbierto(false);
     } finally {
       setUploading(false);
     }
@@ -90,8 +108,9 @@ export default function Uploader({
           body: JSON.stringify({ id }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Error al analizar el documento");
+        if (!res.ok) throw new Error(data.error ?? "No se pudo analizar el documento");
         actualizar(id, { doc_type: data.doc_type, extraction: data.extraction });
+        setPanelMovil("datos");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado");
       } finally {
@@ -101,7 +120,6 @@ export default function Uploader({
     [actualizar],
   );
 
-  /** Sube el borrador tal y como está en pantalla. */
   const guardarBorrador = useCallback(async (doc: Doc) => {
     const res = await fetch(`/api/documents/${doc.id}`, {
       method: "PATCH",
@@ -134,9 +152,7 @@ export default function Uploader({
     setAviso(null);
     setConfirmando(true);
     try {
-      // Primero se persiste lo que hay en pantalla; luego se confirma.
       await guardarBorrador(selected);
-
       const res = await fetch("/api/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -148,9 +164,9 @@ export default function Uploader({
       actualizar(selected.id, { doc_type: selected.extraction.tipo_documento });
       await refrescarRegistros();
       setAviso(
-        `Guardado: ${data.lineas} ${data.lineas === 1 ? "línea" : "líneas"} y ${data.chunks} ${
-          data.chunks === 1 ? "fragmento" : "fragmentos"
-        } con embedding`,
+        `Archivado · ${data.lineas} ${data.lineas === 1 ? "línea" : "líneas"} y ${data.chunks} ${
+          data.chunks === 1 ? "fragmento indexado" : "fragmentos indexados"
+        }`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error inesperado");
@@ -159,183 +175,283 @@ export default function Uploader({
     }
   }, [selected, actualizar, guardarBorrador, refrescarRegistros]);
 
-  /** Trae un documento guardado al panel de arriba. */
   const abrirDocumento = useCallback((documentId: string) => {
     setSelectedId(documentId);
+    setVista("revisar");
+    setPanelMovil("documento");
     setAviso(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  const onDrop = (event: React.DragEvent) => {
-    event.preventDefault();
-    setDragging(false);
-    const file = event.dataTransfer.files?.[0];
-    if (file) upload(file);
-  };
+  // Arrastrar sobre cualquier punto de la ventana: el objetivo es la aplicación entera.
+  useEffect(() => {
+    const sobre = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      setDragging(true);
+    };
+    const fuera = (e: DragEvent) => {
+      if (e.relatedTarget === null) setDragging(false);
+    };
+    const soltar = (e: DragEvent) => {
+      e.preventDefault();
+      setDragging(false);
+      const file = e.dataTransfer?.files?.[0];
+      if (file) upload(file);
+    };
+    window.addEventListener("dragover", sobre);
+    window.addEventListener("dragleave", fuera);
+    window.addEventListener("drop", soltar);
+    return () => {
+      window.removeEventListener("dragover", sobre);
+      window.removeEventListener("dragleave", fuera);
+      window.removeEventListener("drop", soltar);
+    };
+  }, [upload]);
+
+  const botonBarra =
+    "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] transition";
 
   return (
-    <>
-      <section
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        onClick={() => inputRef.current?.click()}
-        className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed px-6 py-8 text-center transition ${
-          dragging
-            ? "border-accent bg-accent/5"
-            : "border-border-soft bg-surface hover:border-accent/60"
-        }`}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) upload(file);
-            e.target.value = "";
-          }}
-        />
-        <p className="text-base font-medium">
-          {uploading ? "Subiendo…" : "Arrastra un archivo o haz clic para elegirlo"}
-        </p>
-        <p className="text-xs text-muted">PNG, JPG, WebP, GIF o PDF · hasta 20 MB</p>
-      </section>
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
+        <span className="font-marca text-[17px] font-semibold tracking-[-0.01em]">
+          Extracto
+        </span>
+        <span className="hidden text-[12px] text-label sm:inline">
+          facturas, recibos y contratos revisados por ti
+        </span>
 
-      {docs.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {docs.map((doc) => (
-            <button
-              key={doc.id}
-              onClick={() => {
-                setSelectedId(doc.id);
-                setAviso(null);
-              }}
-              title={doc.filename}
-              className={`max-w-[260px] truncate rounded-full border px-3 py-1.5 text-xs transition ${
-                selectedId === doc.id
-                  ? "border-accent bg-accent/10 text-accent"
-                  : "border-border-soft text-muted hover:border-accent/50"
-              }`}
-            >
-              {doc.filename}
-              <span className="opacity-70">
-                {" · "}
-                {formatSize(Number(doc.size_bytes))}
-                {doc.doc_type ? ` · ${ETIQUETA_TIPO[doc.doc_type as "otro"] ?? doc.doc_type}` : ""}
-              </span>
-            </button>
-          ))}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => setVista(vista === "archivo" ? "revisar" : "archivo")}
+            aria-pressed={vista === "archivo"}
+            className={`${botonBarra} ${
+              vista === "archivo"
+                ? "border-accent/40 bg-accent-soft text-accent"
+                : "border-line text-ink-soft hover:border-line-strong hover:bg-sunken"
+            }`}
+          >
+            <IconoArchivo className="h-3.5 w-3.5" />
+            Archivo
+            <span className="cifra text-label">{registros.length}</span>
+          </button>
+
+          <button
+            onClick={() => setChatAbierto(true)}
+            className={`${botonBarra} border-line text-ink-soft hover:border-line-strong hover:bg-sunken`}
+          >
+            <IconoPregunta className="h-3.5 w-3.5" />
+            Preguntar
+          </button>
+
+          <ConmutadorTema />
+
+          <button
+            onClick={() => setSubirAbierto(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition hover:opacity-90"
+          >
+            <IconoSubir className="h-3.5 w-3.5" />
+            Subir
+          </button>
         </div>
-      )}
+      </header>
 
       {error && (
-        <p className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-          {error}
-        </p>
+        <div className="flex shrink-0 items-start gap-2 border-b border-danger/25 bg-danger-soft px-4 py-2.5 text-[13px] text-danger">
+          <IconoAviso className="mt-0.5 h-3.5 w-3.5" />
+          <p className="flex-1">{error}</p>
+          <button onClick={() => setError(null)} className="underline-offset-2 hover:underline">
+            Descartar
+          </button>
+        </div>
       )}
 
-      <section className="grid flex-1 items-start gap-6 lg:grid-cols-2">
-        {/* Documento */}
-        <div className="overflow-hidden rounded-2xl border border-border-soft bg-surface lg:sticky lg:top-6">
-          {!selected ? (
-            <div className="flex h-[70vh] items-center justify-center text-sm text-muted">
-              La vista previa aparecerá aquí.
-            </div>
-          ) : selected.mime_type === "application/pdf" ? (
-            <object
-              data={`/api/files/${selected.id}`}
-              type="application/pdf"
-              className="h-[70vh] w-full"
-            >
-              <div className="flex h-full items-center justify-center p-6 text-sm text-muted">
-                Tu navegador no puede mostrar el PDF.
-                <a className="ml-1 underline" href={`/api/files/${selected.id}`}>
-                  Ábrelo en una pestaña
-                </a>
-              </div>
-            </object>
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`/api/files/${selected.id}`}
-              alt={selected.filename}
-              className="mx-auto max-h-[70vh] w-auto object-contain p-4"
-            />
-          )}
+      {vista === "archivo" ? (
+        <div className="flex-1 overflow-y-auto">
+          <ListaRegistros
+            registros={registros}
+            seleccionado={selectedId}
+            onAbrir={abrirDocumento}
+          />
         </div>
-
-        {/* Datos */}
-        <div className="rounded-2xl border border-border-soft bg-surface p-4">
-          {!selected ? (
-            <p className="flex h-[70vh] items-center justify-center text-sm text-muted">
-              Selecciona un archivo.
-            </p>
-          ) : !selected.extraction ? (
-            <div className="flex h-[70vh] flex-col items-center justify-center gap-3 text-center">
-              <p className="max-w-xs text-sm text-muted">
-                Analiza el documento para clasificarlo y extraer sus datos. Después podrás
-                corregir a mano cualquier campo.
-              </p>
-              <button
-                type="button"
-                onClick={() => analyze(selected.id)}
-                disabled={analyzing}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-40 dark:text-[#0b0b0d]"
-              >
-                {analyzing ? "Analizando…" : "Analizar documento"}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium">
-                  Datos extraídos
-                  {confirmado && (
-                    <span className="ml-2 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-normal text-emerald-600 dark:text-emerald-400">
-                      guardado
-                    </span>
-                  )}
-                </h2>
+      ) : (
+        <>
+          {selected && (
+            <div className="flex shrink-0 border-b border-line bg-surface lg:hidden">
+              {(
+                [
+                  ["documento", "Documento"],
+                  ["datos", "Datos extraídos"],
+                ] as const
+              ).map(([clave, etiqueta]) => (
                 <button
-                  type="button"
-                  onClick={() => analyze(selected.id)}
-                  disabled={analyzing}
-                  className="text-xs text-muted underline-offset-2 hover:underline disabled:opacity-40"
+                  key={clave}
+                  onClick={() => setPanelMovil(clave)}
+                  aria-current={panelMovil === clave}
+                  className={`flex-1 border-b-2 px-3 py-2 text-[13px] transition ${
+                    panelMovil === clave
+                      ? "border-accent text-accent"
+                      : "border-transparent text-label hover:text-ink"
+                  }`}
                 >
-                  {analyzing ? "Analizando…" : "Volver a analizar"}
+                  {etiqueta}
                 </button>
-              </div>
-
-              <DatosForm
-                key={selected.id}
-                extraccion={selected.extraction}
-                onChange={(siguiente) => {
-                  actualizar(selected.id, { extraction: siguiente });
-                  setAviso(null);
-                }}
-                onGuardar={guardar}
-                onConfirmar={confirmar}
-                guardando={guardando}
-                confirmando={confirmando}
-                aviso={aviso}
-              />
+              ))}
             </div>
           )}
-        </div>
-      </section>
 
-      <ListaRegistros
-        registros={registros}
-        seleccionado={selectedId}
-        onAbrir={abrirDocumento}
+          <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
+            {/* Documento */}
+            <section
+              className={`min-h-0 flex-col border-b border-line lg:flex lg:border-b-0 lg:border-r ${
+                panelMovil === "documento" || !selected ? "flex" : "hidden"
+              }`}
+            >
+              {selected ? (
+                <>
+                  <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-surface px-2.5 text-[13px]">
+                    <SelectorDocumento
+                      docs={docs}
+                      selected={selected}
+                      archivados={archivados}
+                      onElegir={abrirDocumento}
+                    />
+                    <span className="cifra shrink-0 text-label">
+                      {formatSize(Number(selected.size_bytes))}
+                    </span>
+                    {confirmado && (
+                      <span className="ml-auto flex shrink-0 items-center gap-1 text-ok">
+                        <IconoConforme className="h-3.5 w-3.5" />
+                        Archivado
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-auto bg-sunken p-4">
+                    {selected.mime_type === "application/pdf" ? (
+                      <object
+                        data={`/api/files/${selected.id}`}
+                        type="application/pdf"
+                        className="h-full min-h-[70vh] w-full rounded-lg border border-line bg-white"
+                      >
+                        <p className="p-6 text-[13px] text-ink-soft">
+                          Tu navegador no puede mostrar el PDF.{" "}
+                          <a className="text-accent underline" href={`/api/files/${selected.id}`}>
+                            Ábrelo en una pestaña
+                          </a>
+                        </p>
+                      </object>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/files/${selected.id}`}
+                        alt={selected.filename}
+                        className="mx-auto w-auto max-w-full rounded-lg border border-line bg-white shadow-[0_1px_2px_rgba(15,23,42,0.06)]"
+                      />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <button
+                  onClick={() => setSubirAbierto(true)}
+                  className="flex flex-1 flex-col items-center justify-center gap-3 bg-sunken p-8 text-center transition hover:bg-[color-mix(in_oklab,var(--sunken)_92%,var(--ink))]"
+                >
+                  <IconoSubir className="h-6 w-6 text-label" />
+                  <span className="text-[15px] font-medium">
+                    Sube tu primer documento
+                  </span>
+                  <span className="max-w-sm text-[13px] text-label">
+                    Una factura, un recibo o un contrato. Lo leo, lo clasifico y te dejo
+                    corregir lo que haga falta antes de archivarlo.
+                  </span>
+                </button>
+              )}
+            </section>
+
+            {/* Datos */}
+            <section
+              className={`min-h-0 flex-col bg-surface lg:flex ${
+                panelMovil === "datos" && selected ? "flex" : "hidden lg:flex"
+              }`}
+            >
+              {!selected ? (
+                <p className="flex flex-1 items-center justify-center px-8 text-center text-[13px] text-label">
+                  Los datos del documento aparecerán aquí para que los revises.
+                </p>
+              ) : !selected.extraction ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+                  <p className="max-w-xs text-[13px] leading-relaxed text-ink-soft">
+                    {analyzing
+                      ? "Leyendo el documento, clasificándolo y transcribiendo su texto. Tarda entre 10 y 20 segundos."
+                      : "Analiza el documento para extraer sus campos. Después podrás corregir lo que haga falta antes de archivarlo."}
+                  </p>
+                  <button
+                    onClick={() => analyze(selected.id)}
+                    disabled={analyzing}
+                    className="rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    {analyzing ? "Analizando…" : "Analizar documento"}
+                  </button>
+                </div>
+              ) : (
+                <div className="entra flex min-h-0 flex-1 flex-col">
+                  <div className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-4">
+                    <h2 className="text-[13px] font-medium">Datos extraídos</h2>
+                    <button
+                      onClick={() => analyze(selected.id)}
+                      disabled={analyzing}
+                      className="ml-auto flex items-center gap-1.5 text-[13px] text-label transition hover:text-ink disabled:opacity-50"
+                    >
+                      <IconoRecargar className="h-3.5 w-3.5" />
+                      {analyzing ? "Analizando…" : "Volver a analizar"}
+                    </button>
+                  </div>
+
+                  <DatosForm
+                    key={selected.id}
+                    extraccion={selected.extraction}
+                    confirmado={confirmado}
+                    onChange={(siguiente) => {
+                      actualizar(selected.id, { extraction: siguiente });
+                      setAviso(null);
+                    }}
+                    onGuardar={guardar}
+                    onConfirmar={confirmar}
+                    guardando={guardando}
+                    confirmando={confirmando}
+                    aviso={aviso}
+                  />
+                </div>
+              )}
+            </section>
+          </div>
+        </>
+      )}
+
+      <Chat
+        abierto={chatAbierto}
+        onCerrar={() => setChatAbierto(false)}
+        hayDocumentos={registros.length > 0}
+        onAbrirDocumento={(id) => {
+          abrirDocumento(id);
+          setChatAbierto(false);
+        }}
       />
 
-      <Chat hayDocumentos={registros.length > 0} onAbrirDocumento={abrirDocumento} />
-    </>
+      {subirAbierto && (
+        <SubirModal
+          subiendo={uploading}
+          onCerrar={() => setSubirAbierto(false)}
+          onArchivo={upload}
+        />
+      )}
+
+      {dragging && !subirAbierto && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-accent/5 backdrop-blur-[1px]">
+          <div className="rounded-xl border-2 border-dashed border-accent bg-surface px-6 py-4 text-[13px] font-medium text-accent">
+            Suelta el documento para subirlo
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

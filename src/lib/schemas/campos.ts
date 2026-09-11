@@ -1,6 +1,6 @@
 import type { TipoDocumento } from "./tipos";
 
-export type TipoCampo = "texto" | "numero" | "fecha";
+export type TipoCampo = "texto" | "numero" | "fecha" | "parrafo";
 
 export type Campo = {
   /** Ruta dentro de la extracción, p. ej. "emisor.nombre". */
@@ -38,7 +38,7 @@ const importes: Seccion = {
 
 const resumen: Seccion = {
   titulo: "Resumen",
-  campos: [{ path: "resumen", label: "Resumen", tipo: "texto", ancho: "completo" }],
+  campos: [{ path: "resumen", label: "Resumen", tipo: "parrafo", ancho: "completo" }],
 };
 
 export const SECCIONES: Record<TipoDocumento, Seccion[]> = {

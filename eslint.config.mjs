@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Herramientas de la skill de diseño: no son código del producto.
+    ".agents/**",
+    ".impeccable/**",
   ]),
 ]);
 

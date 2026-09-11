@@ -1,5 +1,6 @@
 "use client";
 
+import { IconoArchivo } from "./iconos";
 import { ETIQUETA_TIPO } from "@/lib/schemas";
 import type { Registro } from "@/lib/registros";
 
@@ -21,63 +22,74 @@ export default function ListaRegistros({
   seleccionado: string | null;
   onAbrir: (documentId: string) => void;
 }) {
+  if (registros.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+        <IconoArchivo className="h-6 w-6 text-label" />
+        <p className="text-[15px] font-medium">Todavía no has archivado nada</p>
+        <p className="max-w-sm text-[13px] text-label">
+          Cuando confirmes un documento, sus datos pasan a tablas consultables y su texto
+          queda indexado para poder preguntarle.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <section className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-medium">Documentos guardados</h2>
-        <span className="text-xs text-muted">
-          {registros.length === 0
-            ? "ninguno todavía"
-            : `${registros.length} ${registros.length === 1 ? "documento" : "documentos"}`}
+    <div className="mx-auto max-w-5xl px-4 py-5">
+      <div className="mb-3 flex items-baseline gap-2">
+        <h2 className="text-[15px] font-medium">Archivo</h2>
+        <span className="cifra text-[13px] text-label">
+          {registros.length} {registros.length === 1 ? "documento" : "documentos"}
         </span>
       </div>
 
-      {registros.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-border-soft px-4 py-6 text-center text-sm text-muted">
-          Cuando confirmes un documento aparecerá aquí, con sus datos en tablas y su
-          texto indexado en pgvector.
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-2xl border border-border-soft bg-surface">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="text-xs uppercase tracking-wider text-muted">
-              <tr className="border-b border-border-soft">
-                <th className="px-4 py-2 font-medium">Tipo</th>
-                <th className="px-4 py-2 font-medium">Número</th>
-                <th className="px-4 py-2 font-medium">Fecha</th>
-                <th className="px-4 py-2 font-medium">Emisor</th>
-                <th className="px-4 py-2 text-right font-medium">Total</th>
-                <th className="px-4 py-2 text-right font-medium">Líneas</th>
-                <th className="px-4 py-2 text-right font-medium">Chunks</th>
+      <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+        <table className="w-full min-w-[720px] text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-label">
+              <th className="px-3 py-2 font-medium">Tipo</th>
+              <th className="px-3 py-2 font-medium">Número</th>
+              <th className="px-3 py-2 font-medium">Fecha</th>
+              <th className="px-3 py-2 font-medium">Emisor</th>
+              <th className="px-3 py-2 text-right font-medium">Total</th>
+              <th className="px-3 py-2 text-right font-medium">Líneas</th>
+              <th className="px-3 py-2 text-right font-medium">Fragmentos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {registros.map((r) => (
+              <tr
+                key={r.id}
+                onClick={() => onAbrir(r.document_id)}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onAbrir(r.document_id);
+                  }
+                }}
+                title={r.filename}
+                className={`cursor-pointer border-b border-line/70 transition last:border-0 hover:bg-sunken ${
+                  seleccionado === r.document_id ? "bg-accent-soft" : ""
+                }`}
+              >
+                <td className="px-3 py-2.5">
+                  {ETIQUETA_TIPO[r.tipo_documento as "otro"] ?? r.tipo_documento}
+                </td>
+                <td className="cifra px-3 py-2.5 text-ink-soft">{r.numero_documento ?? "—"}</td>
+                <td className="cifra px-3 py-2.5 text-ink-soft">{r.fecha_emision ?? "—"}</td>
+                <td className="max-w-[220px] truncate px-3 py-2.5">{r.emisor_nombre ?? "—"}</td>
+                <td className="cifra px-3 py-2.5 text-right font-medium">
+                  {importe(r.total, r.moneda)}
+                </td>
+                <td className="cifra px-3 py-2.5 text-right text-label">{r.lineas}</td>
+                <td className="cifra px-3 py-2.5 text-right text-label">{r.chunks}</td>
               </tr>
-            </thead>
-            <tbody>
-              {registros.map((r) => (
-                <tr
-                  key={r.id}
-                  onClick={() => onAbrir(r.document_id)}
-                  className={`cursor-pointer border-b border-border-soft/60 transition last:border-0 hover:bg-foreground/[0.04] ${
-                    seleccionado === r.document_id ? "bg-accent/[0.07]" : ""
-                  }`}
-                  title={r.filename}
-                >
-                  <td className="px-4 py-2">
-                    {ETIQUETA_TIPO[r.tipo_documento as "otro"] ?? r.tipo_documento}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">{r.numero_documento ?? "—"}</td>
-                  <td className="px-4 py-2 font-mono text-xs">{r.fecha_emision ?? "—"}</td>
-                  <td className="max-w-[220px] truncate px-4 py-2">{r.emisor_nombre ?? "—"}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {importe(r.total, r.moneda)}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums text-muted">{r.lineas}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-muted">{r.chunks}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

@@ -23,17 +23,5 @@ export default async function Home() {
       "No hay conexión con PostgreSQL. ¿Levantaste la base con `docker compose up -d`?";
   }
 
-  return (
-    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-6 py-12">
-      <header className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight">Extracto</h1>
-        <p className="text-sm text-muted">
-          Sube una imagen o un PDF, revisa los datos y confírmalos: se guardan en tablas
-          de PostgreSQL y su texto queda indexado con pgvector.
-        </p>
-      </header>
-
-      <Uploader initialDocs={docs} initialRegistros={registros} dbError={dbError} />
-    </main>
-  );
+  return <Uploader initialDocs={docs} initialRegistros={registros} dbError={dbError} />;
 }

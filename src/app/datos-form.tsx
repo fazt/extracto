@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { IconoAviso, IconoConforme, IconoMas, IconoQuitar } from "./iconos";
 import {
   ETIQUETA_TIPO,
   TIPOS,
@@ -22,15 +23,21 @@ const CONTRATO_VACIO = {
   clausulas_destacadas: [] as string[],
 };
 
-const LINEA_VACIA = {
-  descripcion: "",
-  cantidad: null,
-  precio_unitario: null,
-  importe: null,
-};
+const LINEA_VACIA = { descripcion: "", cantidad: null, precio_unitario: null, importe: null };
+
+/** Campo de entrada: plano hasta que lo tocas, con filete ámbar cuando reclama atención. */
+function entrada(conError: boolean, cifra = false) {
+  return [
+    "w-full rounded-md border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition",
+    "placeholder:text-label/70 hover:border-line-strong focus:border-accent focus:ring-2 focus:ring-accent/15",
+    cifra ? "cifra text-right" : "",
+    conError ? "border-warn/60 bg-warn-soft" : "border-line",
+  ].join(" ");
+}
 
 export default function DatosForm({
   extraccion,
+  confirmado,
   onChange,
   onGuardar,
   onConfirmar,
@@ -39,6 +46,7 @@ export default function DatosForm({
   aviso,
 }: {
   extraccion: Extraccion;
+  confirmado: boolean;
   onChange: (siguiente: Extraccion) => void;
   onGuardar: () => void;
   onConfirmar: () => void;
@@ -46,8 +54,8 @@ export default function DatosForm({
   confirmando: boolean;
   aviso: string | null;
 }) {
-  // Texto tal cual lo escribe el usuario en los campos numéricos, para no
-  // perder lo tecleado mientras el valor todavía no es un número válido.
+  // Texto tal cual lo escribe el usuario en los campos numéricos, para no perder
+  // lo tecleado mientras el valor todavía no es un número válido.
   const [borradores, setBorradores] = useState<Record<string, string>>({});
 
   const tipo = extraccion.tipo_documento as TipoDocumento;
@@ -64,7 +72,6 @@ export default function DatosForm({
 
   const set = (path: string, valor: unknown) => onChange(escribir(extraccion, path, valor));
 
-  /** Al salir del campo dejamos de mostrar el texto crudo y mandamos el valor. */
   const olvidarBorrador = (path: string) =>
     setBorradores((b) => {
       const resto = { ...b };
@@ -80,54 +87,75 @@ export default function DatosForm({
     onChange(siguiente);
   };
 
-  const campoTexto = (campo: Campo) => {
+  const actualizarLinea = (indice: number, clave: string, valor: unknown) =>
+    set(
+      "lineas",
+      extraccion.lineas.map((l, j) => (j === indice ? { ...l, [clave]: valor } : l)),
+    );
+
+  const campoEntrada = (campo: Campo) => {
     const valor = leer(extraccion, campo.path);
     const malos = errores[campo.path];
 
-    if (campo.tipo === "numero") {
-      const borrador = borradores[campo.path];
-      const mostrado = borrador ?? (valor === null || valor === undefined ? "" : String(valor));
+    if (campo.tipo === "parrafo") {
       return (
-        <input
-          inputMode="decimal"
-          value={mostrado}
-          onChange={(e) => {
-            const texto = e.target.value;
-            setBorradores((b) => ({ ...b, [campo.path]: texto }));
-            const n = aNumero(texto);
-            set(campo.path, Number.isNaN(n) ? null : n);
-          }}
-          onBlur={() => olvidarBorrador(campo.path)}
-          className={entrada(!!malos)}
+        <textarea
+          rows={2}
+          placeholder="—"
+          aria-invalid={malos ? true : undefined}
+          value={valor === null || valor === undefined ? "" : String(valor)}
+          onChange={(e) => set(campo.path, e.target.value === "" ? null : e.target.value)}
+          className={`${entrada(!!malos)} resize-y leading-relaxed`}
         />
       );
     }
 
+    const esNumero = campo.tipo === "numero";
+    const borrador = borradores[campo.path];
+    const mostrado = esNumero
+      ? (borrador ?? (valor === null || valor === undefined ? "" : String(valor)))
+      : valor === null || valor === undefined
+        ? ""
+        : String(valor);
+
     return (
       <input
-        type={campo.tipo === "fecha" ? "text" : "text"}
-        placeholder={campo.tipo === "fecha" ? "AAAA-MM-DD" : undefined}
-        value={valor === null || valor === undefined ? "" : String(valor)}
-        onChange={(e) => set(campo.path, e.target.value === "" ? null : e.target.value)}
-        className={entrada(!!malos)}
+        inputMode={esNumero ? "decimal" : undefined}
+        placeholder={campo.tipo === "fecha" ? "AAAA-MM-DD" : "—"}
+        aria-invalid={malos ? true : undefined}
+        value={mostrado}
+        onChange={(e) => {
+          const texto = e.target.value;
+          if (esNumero) {
+            setBorradores((b) => ({ ...b, [campo.path]: texto }));
+            const n = aNumero(texto);
+            set(campo.path, Number.isNaN(n) ? null : n);
+          } else {
+            set(campo.path, texto === "" ? null : texto);
+          }
+        }}
+        onBlur={() => esNumero && olvidarBorrador(campo.path)}
+        className={entrada(!!malos, esNumero)}
       />
     );
   };
 
   const secciones = SECCIONES[tipo] ?? SECCIONES.otro;
   const erroresDeLineas = errores["lineas"] ?? [];
+  const valido = problemas.length === 0;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium uppercase tracking-wider text-muted">
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
+          <label htmlFor="tipo-doc" className="text-[11px] font-medium uppercase tracking-[0.06em] text-label">
             Tipo
           </label>
           <select
+            id="tipo-doc"
             value={tipo}
             onChange={(e) => cambiarTipo(e.target.value as TipoDocumento)}
-            className="rounded-lg border border-border-soft bg-background px-2.5 py-1.5 text-sm"
+            className="rounded-md border border-line bg-surface px-2 py-1 text-[13px] outline-none transition hover:border-line-strong focus:border-accent focus:ring-2 focus:ring-accent/15"
           >
             {TIPOS.map((t) => (
               <option key={t} value={t}>
@@ -135,222 +163,228 @@ export default function DatosForm({
               </option>
             ))}
           </select>
-          <span className="text-xs text-muted">
+
+          <span className="cifra text-[13px] text-label">
             {Math.round(extraccion.confianza * 100)}% de confianza
           </span>
-        </div>
 
-        <span
-          className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-            problemas.length === 0
-              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              : "bg-red-500/10 text-red-600 dark:text-red-400"
-          }`}
-        >
-          {problemas.length === 0
-            ? "Válido"
-            : `${problemas.length} ${problemas.length === 1 ? "problema" : "problemas"}`}
-        </span>
-      </div>
-
-      {secciones.map((seccion) => (
-        <fieldset key={seccion.titulo} className="space-y-3">
-          <legend className="text-xs font-medium uppercase tracking-wider text-muted">
-            {seccion.titulo}
-          </legend>
-          <div className="grid grid-cols-2 gap-3">
-            {seccion.campos.map((campo) => {
-              const malos = errores[campo.path];
-              return (
-                <div
-                  key={campo.path}
-                  className={campo.ancho === "completo" ? "col-span-2" : "col-span-2 sm:col-span-1"}
-                >
-                  <label
-                    className={`mb-1 block text-xs ${malos ? "text-red-600 dark:text-red-400" : "text-muted"}`}
-                  >
-                    {campo.label}
-                  </label>
-                  {campoTexto(campo)}
-                  {malos?.map((m) => (
-                    <p key={m} className="mt-1 text-xs text-red-600 dark:text-red-400">
-                      {m}
-                    </p>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        </fieldset>
-      ))}
-
-      {MUESTRA_LINEAS[tipo] && (
-        <fieldset className="space-y-2">
-          <legend className="text-xs font-medium uppercase tracking-wider text-muted">
-            Líneas
-          </legend>
-
-          {erroresDeLineas.map((m) => (
-            <p key={m} className="text-xs text-red-600 dark:text-red-400">
-              {m}
-            </p>
-          ))}
-
-          <div className="space-y-2">
-            {extraccion.lineas.map((linea, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2">
-                {(
-                  [
-                    ["descripcion", "col-span-12 sm:col-span-5", "Descripción"],
-                    ["cantidad", "col-span-4 sm:col-span-2", "Cant."],
-                    ["precio_unitario", "col-span-4 sm:col-span-2", "Precio"],
-                    ["importe", "col-span-4 sm:col-span-2", "Importe"],
-                  ] as const
-                ).map(([clave, clase, etiqueta]) => {
-                  const path = `lineas.${i}.${clave}`;
-                  const malos = errores[path];
-                  const esNumero = clave !== "descripcion";
-                  const borrador = borradores[path];
-                  const valor = linea[clave];
-                  const mostrado =
-                    borrador ?? (valor === null || valor === undefined ? "" : String(valor));
-                  return (
-                    <div key={clave} className={clase}>
-                      <input
-                        aria-label={`${etiqueta} línea ${i + 1}`}
-                        placeholder={etiqueta}
-                        inputMode={esNumero ? "decimal" : undefined}
-                        value={mostrado}
-                        onChange={(e) => {
-                          const texto = e.target.value;
-                          if (esNumero) {
-                            setBorradores((b) => ({ ...b, [path]: texto }));
-                            const n = aNumero(texto);
-                            actualizarLinea(i, clave, Number.isNaN(n) ? null : n);
-                          } else {
-                            actualizarLinea(i, clave, texto);
-                          }
-                        }}
-                        onBlur={() => olvidarBorrador(path)}
-                        className={entrada(!!malos)}
-                      />
-                      {malos?.map((m) => (
-                        <p key={m} className="mt-1 text-xs text-red-600 dark:text-red-400">
-                          {m}
-                        </p>
-                      ))}
-                    </div>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() =>
-                    set(
-                      "lineas",
-                      extraccion.lineas.filter((_, j) => j !== i),
-                    )
-                  }
-                  className="col-span-12 justify-self-end text-xs text-muted hover:text-red-600 sm:col-span-1 sm:justify-self-center"
-                  aria-label={`Eliminar línea ${i + 1}`}
-                >
-                  Quitar
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => set("lineas", [...extraccion.lineas, { ...LINEA_VACIA }])}
-            className="text-xs text-accent hover:underline"
+          <span
+            className={`ml-auto flex items-center gap-1.5 text-[13px] ${
+              valido ? "text-ok" : "text-warn"
+            }`}
           >
-            + Añadir línea
-          </button>
-        </fieldset>
-      )}
-
-      {tipo === "contrato" && (
-        <fieldset className="space-y-2">
-          <legend className="text-xs font-medium uppercase tracking-wider text-muted">
-            Cláusulas destacadas
-          </legend>
-          <textarea
-            rows={4}
-            value={(extraccion.contrato?.clausulas_destacadas ?? []).join("\n")}
-            onChange={(e) =>
-              set(
-                "contrato.clausulas_destacadas",
-                e.target.value.split("\n").filter((l) => l.trim() !== ""),
-              )
-            }
-            className={entrada(false)}
-            placeholder="Una cláusula por línea"
-          />
-        </fieldset>
-      )}
-
-      {extraccion.notas.length > 0 && (
-        <div className="rounded-lg border border-border-soft bg-foreground/[0.03] p-3">
-          <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted">
-            Notas del modelo
-          </p>
-          <ul className="list-disc space-y-1 pl-4 text-xs text-muted">
-            {extraccion.notas.map((n, i) => (
-              <li key={i}>{n}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3 border-t border-border-soft pt-4">
-        <button
-          type="button"
-          onClick={onConfirmar}
-          disabled={confirmando || guardando || problemas.length > 0}
-          title={
-            problemas.length > 0
-              ? "Corrige los campos en rojo para poder confirmar"
-              : "Guarda los datos en tablas e indexa el texto"
-          }
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#0b0b0d]"
-        >
-          {confirmando ? "Guardando…" : "Confirmar y guardar"}
-        </button>
-
-        <button
-          type="button"
-          onClick={onGuardar}
-          disabled={guardando || confirmando}
-          className="rounded-lg border border-border-soft px-4 py-2 text-sm transition hover:border-accent/60 disabled:opacity-40"
-        >
-          {guardando ? "Guardando…" : "Guardar borrador"}
-        </button>
-
-        {problemas.length > 0 ? (
-          <span className="text-xs text-muted">
-            Corrige los campos en rojo para poder confirmar.
+            {valido ? (
+              <>
+                <IconoConforme className="h-3.5 w-3.5" />
+                Sin problemas
+              </>
+            ) : (
+              <>
+                <IconoAviso className="h-3.5 w-3.5" />
+                {problemas.length}{" "}
+                {problemas.length === 1 ? "campo por revisar" : "campos por revisar"}
+              </>
+            )}
           </span>
-        ) : (
-          aviso && (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">{aviso}</span>
-          )
+        </div>
+
+        {secciones.map((seccion) => (
+          <fieldset key={seccion.titulo} className="border-b border-line px-4 py-3.5">
+            <legend className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.06em] text-label">
+              {seccion.titulo}
+            </legend>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+              {seccion.campos.map((campo) => {
+                const malos = errores[campo.path];
+                return (
+                  <div
+                    key={campo.path}
+                    className={campo.ancho === "completo" ? "col-span-2" : "col-span-2 sm:col-span-1"}
+                  >
+                    <label className="mb-1 block text-[12px] text-label">{campo.label}</label>
+                    {campoEntrada(campo)}
+                    {malos?.map((m) => (
+                      <p key={m} className="mt-1 flex items-start gap-1 text-[12px] text-warn">
+                        <IconoAviso className="mt-[3px] h-3 w-3" />
+                        <span>{m}</span>
+                      </p>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
+        ))}
+
+        {MUESTRA_LINEAS[tipo] && (
+          <fieldset className="border-b border-line px-4 py-3.5">
+            <legend className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.06em] text-label">
+              Líneas
+            </legend>
+
+            {erroresDeLineas.map((m) => (
+              <p key={m} className="mb-2 flex items-center gap-1 text-[12px] text-warn">
+                <IconoAviso className="h-3 w-3" />
+                {m}
+              </p>
+            ))}
+
+            {extraccion.lineas.length > 0 && (
+              <div className="mb-1 grid grid-cols-[1fr_56px_72px_80px_24px] gap-2 px-0.5 text-[11px] uppercase tracking-[0.06em] text-label">
+                <span>Descripción</span>
+                <span className="text-right">Cant.</span>
+                <span className="text-right">Precio</span>
+                <span className="text-right">Importe</span>
+                <span />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              {extraccion.lineas.map((linea, i) => (
+                <div key={i} className="grid grid-cols-[1fr_56px_72px_80px_24px] items-start gap-2">
+                  {(
+                    [
+                      ["descripcion", "Descripción"],
+                      ["cantidad", "Cantidad"],
+                      ["precio_unitario", "Precio unitario"],
+                      ["importe", "Importe"],
+                    ] as const
+                  ).map(([clave, etiqueta]) => {
+                    const path = `lineas.${i}.${clave}`;
+                    const malos = errores[path];
+                    const esNumero = clave !== "descripcion";
+                    const valor = linea[clave];
+                    const mostrado =
+                      borradores[path] ??
+                      (valor === null || valor === undefined ? "" : String(valor));
+                    return (
+                      <div key={clave}>
+                        <input
+                          aria-label={`${etiqueta}, línea ${i + 1}`}
+                          placeholder="—"
+                          inputMode={esNumero ? "decimal" : undefined}
+                          value={mostrado}
+                          onChange={(e) => {
+                            const texto = e.target.value;
+                            if (esNumero) {
+                              setBorradores((b) => ({ ...b, [path]: texto }));
+                              const n = aNumero(texto);
+                              actualizarLinea(i, clave, Number.isNaN(n) ? null : n);
+                            } else {
+                              actualizarLinea(i, clave, texto);
+                            }
+                          }}
+                          onBlur={() => esNumero && olvidarBorrador(path)}
+                          className={entrada(!!malos, esNumero)}
+                        />
+                        {malos?.map((m) => (
+                          <p key={m} className="mt-1 text-[12px] text-warn">
+                            {m}
+                          </p>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      set(
+                        "lineas",
+                        extraccion.lineas.filter((_, j) => j !== i),
+                      )
+                    }
+                    aria-label={`Quitar línea ${i + 1}`}
+                    className="mt-1.5 text-label transition hover:text-danger"
+                  >
+                    <IconoQuitar className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => set("lineas", [...extraccion.lineas, { ...LINEA_VACIA }])}
+              className="mt-2 flex items-center gap-1 text-[13px] text-accent transition hover:underline"
+            >
+              <IconoMas className="h-3.5 w-3.5" />
+              Añadir línea
+            </button>
+          </fieldset>
+        )}
+
+        {tipo === "contrato" && (
+          <fieldset className="border-b border-line px-4 py-3.5">
+            <legend className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.06em] text-label">
+              Cláusulas destacadas
+            </legend>
+            <textarea
+              rows={4}
+              value={(extraccion.contrato?.clausulas_destacadas ?? []).join("\n")}
+              onChange={(e) =>
+                set(
+                  "contrato.clausulas_destacadas",
+                  e.target.value.split("\n").filter((l) => l.trim() !== ""),
+                )
+              }
+              placeholder="Una cláusula por línea"
+              className={entrada(false)}
+            />
+          </fieldset>
+        )}
+
+        {extraccion.notas.length > 0 && (
+          <div className="px-4 py-3.5">
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-label">
+              Notas del modelo
+            </p>
+            <ul className="space-y-1.5 text-[12px] leading-relaxed text-ink-soft">
+              {extraccion.notas.map((n, i) => (
+                <li key={i} className="flex gap-2">
+                  <span aria-hidden className="text-label">
+                    —
+                  </span>
+                  <span>{n}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
-    </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-surface px-4 py-3">
+        {aviso && (
+          <span className="flex items-center gap-1.5 text-[13px] text-ok">
+            <IconoConforme className="h-3.5 w-3.5" />
+            {aviso}
+          </span>
+        )}
+        {!valido && (
+          <span className="text-[13px] text-label">
+            Corrige los campos marcados para poder archivar.
+          </span>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onGuardar}
+            disabled={guardando || confirmando}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink-soft transition hover:border-line-strong hover:bg-sunken disabled:opacity-50"
+          >
+            {guardando ? "Guardando…" : "Guardar borrador"}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirmar}
+            disabled={confirmando || guardando || !valido}
+            title={valido ? undefined : "Corrige los campos marcados"}
+            className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition hover:bg-[#4338ca] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {confirmando ? "Archivando…" : confirmado ? "Volver a archivar" : "Confirmar y archivar"}
+          </button>
+        </div>
+      </div>
+    </>
   );
-
-  function actualizarLinea(indice: number, clave: string, valor: unknown) {
-    set(
-      "lineas",
-      extraccion.lineas.map((l, j) => (j === indice ? { ...l, [clave]: valor } : l)),
-    );
-  }
-}
-
-function entrada(conError: boolean) {
-  return `w-full rounded-lg border px-2.5 py-1.5 text-sm outline-none transition focus:ring-2 ${
-    conError
-      ? "border-red-500 bg-red-500/5 text-red-700 focus:ring-red-500/30 dark:text-red-300"
-      : "border-border-soft bg-background focus:ring-accent/30"
-  }`;
 }

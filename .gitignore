@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Herramientas de la skill de diseño y sus comps (8 MB de imágenes generadas)
+/.agents/
+/.claude/
+skills-lock.json
+/.impeccable/mocks/
+/.impeccable/build/
+/.impeccable/review/
+/.impeccable/questions/
